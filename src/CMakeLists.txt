@@ -1,11 +1,11 @@
 include_directories(".")
 
-find_package(Boost REQUIRED
-  COMPONENTS
-    date_time
-    filesystem
-    iostreams
-    thread
+find_package(Boost CONFIG REQUIRED
+        COMPONENTS
+        date_time
+        filesystem
+        iostreams
+        thread
 )
 
 add_executable(${PROJECT_NAME}
@@ -15,6 +15,7 @@ add_executable(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     jmixin
     jinject
+        jCanvas::Core
     fmt
     expected
     crypt

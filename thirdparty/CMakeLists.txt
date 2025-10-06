@@ -21,7 +21,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/jeffersonfr/jcanvas.git
   GIT_TAG main
 )
-FetchContent_MakeAvailable(jinject)
+FetchContent_MakeAvailable(jcanvas)
 
 # fmt
 FetchContent_Declare(

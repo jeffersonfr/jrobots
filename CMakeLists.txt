@@ -15,4 +15,5 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
 )
 
 add_subdirectory(thirdparty)
+add_subdirectory(config)
 add_subdirectory(src)
