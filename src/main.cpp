@@ -19,7 +19,8 @@ enum class Action {
 };
 
 enum class Event {
-  HitWall
+  HitWall,
+  Finish
 };
 
 static constexpr int ARENA_LIMIT = 100;
@@ -83,6 +84,10 @@ struct Robot {
 
   virtual ~Robot() = default;
 
+  [[nodiscard]] std::string const &name() const {
+    return mName;
+  }
+
   void add_task(std::shared_ptr<Task> task) {
     mTasks.push_back(std::move(task));
   }
@@ -104,21 +109,10 @@ struct Robot {
     return true;
   }
 
-  void pos(int x, int y) {
-    mX = x;
-    mY = y;
-  }
+  void reset() {
+    mTasks.clear();
 
-  [[nodiscard]] std::pair<int, int> pos() const {
-    return {mX, mY};
-  }
-
-  [[nodiscard]] int angle() const {
-    return mDegrees;
-  }
-
-  [[nodiscard]] int canon() const {
-    return mCanonDegrees;
+    stop();
   }
 
   void turn(Turn turn) {
@@ -151,32 +145,12 @@ struct Robot {
     mMove = Move::NONE;
   }
 
-  [[nodiscard]] std::string to_string() const {
-    std::ostringstream out;
-
-    out << "Robot:[" << mName << "] pos=(" << mX << ", " << mY << "), degrees=" << mDegrees << ", canon=" << mCanonDegrees;
-
-    return out.str();
-  }
-
 private:
   std::string mName;
   std::vector<std::shared_ptr<Task> > mTasks;
-  int mX{};
-  int mY{};
-  int mDegrees{};
-  int mCanonDegrees{};
   Turn mTurn{};
   Turn mCanonTurn{};
   Move mMove{};
-
-  void angle(int degrees) {
-    mDegrees = degrees;
-  }
-
-  void canon(int degrees) {
-    mCanonDegrees = degrees;
-  }
 };
 
 struct MoveTask : public Task {
@@ -295,82 +269,142 @@ private:
 };
 
 struct Arena {
-  Arena(jcanvas::jpoint_t<int> size)
+  struct RobotWrapper {
+    explicit RobotWrapper(std::unique_ptr<Robot> &&robot): mRobot{std::move(robot)} {
+    }
+
+    virtual ~RobotWrapper() = default;
+
+    std::unique_ptr<Robot> const &robot() {
+      return mRobot;
+    }
+
+    void pos(int x, int y) {
+      mX = x;
+      mY = y;
+    }
+
+    [[nodiscard]] std::pair<int, int> pos() const {
+      return {mX, mY};
+    }
+
+    void tank_angle(int degrees) {
+      mDegrees = degrees;
+    }
+
+    [[nodiscard]] int tank_angle() const {
+      return mDegrees;
+    }
+
+    void canon_angle(int degrees) {
+      mCanonDegrees = degrees;
+    }
+
+    [[nodiscard]] int canon_angle() const {
+      return mCanonDegrees;
+    }
+
+    [[nodiscard]] std::string to_string() const {
+      std::ostringstream out;
+
+      out << "Robot:[" << mRobot->name() << "] pos=(" << mX << ", " << mY << "), degrees=" << mDegrees << ", canon=" <<
+          mCanonDegrees;
+
+      return out.str();
+    }
+
+  private:
+    std::unique_ptr<Robot> mRobot;
+    int mX{};
+    int mY{};
+    int mDegrees{};
+    int mCanonDegrees{};
+  };
+
+  explicit Arena(jcanvas::jpoint_t<int> size)
     : mSize{size} {
   }
 
-  virtual ~Arena() {
-  }
+  virtual ~Arena() = default;
 
-  void add(std::shared_ptr<Robot> robot) {
+  void add(std::unique_ptr<Robot> &&robot) {
     std::random_device dev;
     std::mt19937 rng(dev());
     std::uniform_int_distribution<std::mt19937::result_type> w(0 + ARENA_LIMIT, mSize.x - 2 * ARENA_LIMIT);
     std::uniform_int_distribution<std::mt19937::result_type> h(0 + ARENA_LIMIT, mSize.y - 2 * ARENA_LIMIT);
 
-    robot->pos(w(rng), h(rng));
+    auto wrapper = std::make_unique<RobotWrapper>(std::move(robot));
 
-    mRobots.push_back(robot);
+    wrapper->pos(w(rng), h(rng));
+
+    mRobots.push_back(std::move(wrapper));
   }
 
   bool loop() {
     bool alive = false;
     int walkStep = 10;
     int angleStep = 1;
+    int canonAngleStep = 3;
 
-    for (auto &robot: mRobots) {
-      alive = alive | robot->execute();
+    for (auto &wrapper: mRobots) {
+      bool aliveFlag = wrapper->robot()->execute();
 
-      float radians = -M_PI_2 + (robot->angle() * std::numbers::pi) / 180.0f;
-      jcanvas::jpoint_t<int> dir = jcanvas::jpoint_t<int>{
+      alive = alive | aliveFlag;
+
+      float radians = -M_PI_2 + (wrapper->tank_angle() * std::numbers::pi) / 180.0f;
+      auto dir = jcanvas::jpoint_t<int>{
         static_cast<int>(walkStep * std::cos(radians)),
         static_cast<int>(walkStep * std::sin(radians))
       };
 
-      if (robot->move() == Robot::Move::FORWARD) {
-        robot->pos(robot->pos().first + dir.x, robot->pos().second + dir.y);
-      } else if (robot->move() == Robot::Move::BACKWARD) {
-        robot->pos(robot->pos().first - dir.x, robot->pos().second - dir.y);
+      if (wrapper->robot()->move() == Robot::Move::FORWARD) {
+        wrapper->pos(wrapper->pos().first + dir.x, wrapper->pos().second + dir.y);
+      } else if (wrapper->robot()->move() == Robot::Move::BACKWARD) {
+        wrapper->pos(wrapper->pos().first - dir.x, wrapper->pos().second - dir.y);
       }
 
-      auto [x, y] = robot->pos();
+      auto [x, y] = wrapper->pos();
 
       if (x < ARENA_LIMIT or x > (mSize.x - ARENA_LIMIT) or y < ARENA_LIMIT or y > (mSize.y - ARENA_LIMIT)) {
         if (x < ARENA_LIMIT) {
           x = ARENA_LIMIT;
         }
 
-        if (x > (mSize.x - 2 * ARENA_LIMIT)) {
-          x = mSize.x - 2 * ARENA_LIMIT;
+        if (x > (mSize.x - ARENA_LIMIT)) {
+          x = mSize.x - ARENA_LIMIT;
         }
 
         if (y < ARENA_LIMIT) {
           y = ARENA_LIMIT;
         }
 
-        if (y > (mSize.y - 2 * ARENA_LIMIT)) {
-          y = mSize.y - 2 * ARENA_LIMIT;
+        if (y > (mSize.y - ARENA_LIMIT)) {
+          y = mSize.y - ARENA_LIMIT;
         }
 
-        robot->pos(x, y);
-        robot->on_event(Event::HitWall);
+        wrapper->pos(x, y);
+        wrapper->robot()->on_event(Event::HitWall);
       }
 
-      if (robot->turn() == Robot::Turn::LEFT) {
-        robot->angle(robot->angle() - angleStep);
-      } else if (robot->turn() == Robot::Turn::RIGHT) {
-        robot->angle(robot->angle() + angleStep);
+      if (aliveFlag == false) {
+        wrapper->robot()->on_event(Event::Finish);
       }
 
-      if (robot->canon_turn() == Robot::Turn::LEFT) {
-        robot->canon(robot->canon() - angleStep);
-      } else if (robot->canon_turn() == Robot::Turn::RIGHT) {
-        robot->canon(robot->canon() + angleStep);
+      if (wrapper->robot()->turn() == Robot::Turn::LEFT) {
+        wrapper->tank_angle(wrapper->tank_angle() - angleStep);
+      } else if (wrapper->robot()->turn() == Robot::Turn::RIGHT) {
+        wrapper->tank_angle(wrapper->tank_angle() + angleStep);
+      }
+
+      if (wrapper->robot()->canon_turn() == Robot::Turn::LEFT) {
+        wrapper->canon_angle(wrapper->canon_angle() - canonAngleStep);
+      } else if (wrapper->robot()->canon_turn() == Robot::Turn::RIGHT) {
+        wrapper->canon_angle(wrapper->canon_angle() + canonAngleStep);
       }
 
       // verificar se bateu em outro carro e envia o evento
 
-      std::cout << robot->to_string() << std::endl;
+      // std::cout << robot->to_string() << std::endl;
     }
 
     return alive;
@@ -380,13 +414,17 @@ struct Arena {
     return mSize;
   }
 
-  [[nodiscard]] std::vector<std::shared_ptr<Robot> > list_robots() const {
+  [[nodiscard]] std::vector<std::unique_ptr<RobotWrapper> > const &list_robots() {
     return mRobots;
   }
 
 private:
-  std::vector<std::shared_ptr<Robot> > mRobots;
+  std::vector<std::unique_ptr<RobotWrapper> > mRobots;
   jcanvas::jpoint_t<int> mSize;
+
+  static bool has_collide(std::unique_ptr<RobotWrapper> const &o1, std::unique_ptr<RobotWrapper> const &o2) {
+    return false;
+  }
 };
 
 struct Ui : public jcanvas::Window {
@@ -431,12 +469,12 @@ struct Ui : public jcanvas::Window {
 
     for (auto const &robot: mArena->list_robots()) {
       auto pos = robot->pos();
-      auto radians = static_cast<float>((-robot->angle() * M_PI) / 180.0);
-      auto robotRotate = tankImages[(pos.first + pos.second + robot->angle()) % 8]->Rotate(radians);
-      auto canonRadians = static_cast<float>((robot->canon() * M_PI) / 180.0);
+      auto radians = static_cast<float>((-robot->tank_angle() * M_PI) / 180.0);
+      auto robotRotate = tankImages[std::abs(pos.first + pos.second + robot->tank_angle()) % 8]->Rotate(radians);
+      auto canonRadians = static_cast<float>((robot->canon_angle() * M_PI) / 180.0);
       auto canonRotate = canonImage->Rotate(radians - canonRadians);
 
-      std::cout << "robot:" << robot->to_string() << std::endl;
+      // std::cout << "robot:" << robot->to_string() << std::endl;
       gcanvas->DrawImage(robotRotate, jcanvas::jpoint_t<int>{pos.first, pos.second} - robotRotate->GetSize() / 2);
       gcanvas->DrawImage(canonRotate, jcanvas::jpoint_t<int>{pos.first, pos.second} - canonRotate->GetSize() / 2);
     }
@@ -455,7 +493,12 @@ private:
 struct RabbitRobot : public Robot {
   RabbitRobot()
     : Robot{"Rabbit"} {
+    init();
+  }
+
+  void init() {
     add_task(std::make_shared<MoveTask>(std::chrono::seconds{1})); // verificar se as task podem sair,
+    add_task(std::make_shared<RotateTask>(std::chrono::seconds{3}, Robot::Turn::LEFT));
     add_task(std::make_shared<RotateTask>(std::chrono::seconds{3}, Robot::Turn::LEFT));
     add_task(std::make_shared<CanonTask>(std::chrono::seconds{3}, Robot::Turn::RIGHT));
     // verificar se as task podem sair,
@@ -468,6 +511,12 @@ struct RabbitRobot : public Robot {
   virtual void on_event(Event event) {
     // enum of events (crash, stop, out of ammo)
     std::cout << "CRASH ##" << std::endl;
+
+    reset();
+
+    add_task(std::make_shared<RotateTask>(std::chrono::seconds{3}, Robot::Turn::LEFT));
+
+    init();
   }
 };
 
@@ -480,14 +529,13 @@ struct CrazyRobot : public Robot {
     // enum of events (crash, stop, out of ammo)
   }
 };
-
 /////////////////////////////////////// end
 
 int main() {
   std::unique_ptr<Arena> arena = std::make_unique<Arena>(jcanvas::jpoint_t<int>{1280, 1280});
 
-  arena->add(std::make_shared<RabbitRobot>());
-  arena->add(std::make_shared<CrazyRobot>());
+  arena->add(std::make_unique<RabbitRobot>());
+  arena->add(std::make_unique<CrazyRobot>());
 
   Ui ui{std::move(arena)};
 
