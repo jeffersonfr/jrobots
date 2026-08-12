@@ -53,18 +53,6 @@ private:
 };
 
 struct Object {
-  virtual ~Object() = default;
-
-  // execucao generica dos objetos
-  virtual bool execute() = 0;
-
-  virtual bool collide(Object const &) = 0;
-
-  // causa dano em outro objeto
-  virtual void damage(Object &);
-};
-
-struct Robot {
   friend Arena;
 
   enum class Move {
@@ -79,14 +67,30 @@ struct Robot {
     RIGHT
   };
 
-  explicit Robot(std::string name): mName{std::move(name)} {
+  Object(std::string const &name)
+    : mName{name}
+  {
   }
 
-  virtual ~Robot() = default;
+  virtual ~Object() = default;
 
   [[nodiscard]] std::string const &name() const {
     return mName;
   }
+
+  virtual bool execute() {
+    return false;
+  }
+
+private:
+  std::string mName;
+};
+
+struct Robot : public Object {
+  explicit Robot(std::string const &name): Object{name} {
+  }
+
+  ~Robot() override = default;
 
   void add_task(std::shared_ptr<Task> task) {
     mTasks.push_back(std::move(task));
@@ -96,7 +100,7 @@ struct Robot {
     // enum of events (crash, stop, out of ammo)
   }
 
-  bool execute() {
+  bool execute() override {
     // parse list, execute a task, when finish execute the next
     if (!mTasks.empty()) {
       std::shared_ptr<Task> task = mTasks.front();
@@ -154,14 +158,13 @@ private:
 };
 
 struct MoveTask : public Task {
-  MoveTask(std::chrono::milliseconds ms, Robot::Move action = Robot::Move::FORWARD)
+  explicit MoveTask(std::chrono::milliseconds ms, Robot::Move action = Robot::Move::FORWARD)
     : Task{Action::Move}, mAction{action}, mDelay{ms} {
   }
 
-  virtual ~MoveTask() {
-  }
+  ~MoveTask() override = default;
 
-  virtual bool execute(Robot &robot) {
+  bool execute(Robot &robot) override {
     if (mFirst) {
       mFirst = false;
 
@@ -255,17 +258,14 @@ struct StopTask : public Task {
     : Task{Action::Stop} {
   }
 
-  virtual ~StopTask() {
-  }
+  ~StopTask() override = default;
 
-  virtual bool execute(Robot &robot) {
+  bool execute(Robot &robot) override {
     robot.move(Robot::Move::NONE);
     robot.turn(Robot::Turn::NONE);
 
     return false;
   }
-
-private:
 };
 
 struct Arena {

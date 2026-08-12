@@ -21,6 +21,10 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/jeffersonfr/jcanvas.git
   GIT_TAG main
 )
+
+option(JCANVAS_TESTS "" OFF)
+option(JCANVAS_EXAMPLES "" OFF)
+
 FetchContent_MakeAvailable(jcanvas)
 
 # fmt
